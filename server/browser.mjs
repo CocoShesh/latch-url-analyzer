@@ -34,6 +34,10 @@ export async function collectBrowserEvidence(item,scanId,timeoutSeconds,{evidenc
  const health=await firefoxHealth();if(!health.available)return {status:'unavailable',error:`Firefox could not start: ${health.error}. Run the launcher to install Playwright Firefox.`,redirects:[],screenshots:[],engine:'Firefox (Playwright)'};
  const screenshotPaths=[],redirects=[],resourceHosts=new Set(),linkedHosts=new Set();let responseStatus=null,finalUrl=item.original,title=null,visibleText='',forms=0,formFields=[],formActions=[],requestFailures=[];let context;
  const started=Date.now(),deadline=started+timeoutSeconds*1000,remaining=()=>Math.max(1,deadline-Date.now());
+ // Keep time available for the screenshot instead of letting navigation consume the whole URL budget.
+ const screenshotReserve=Math.min(5000,Math.max(2000,Math.floor(timeoutSeconds*250)));
+ const navigationTimeout=()=>Math.max(1000,remaining()-screenshotReserve);
+ const screenshotTimeout=()=>Math.max(1000,Math.min(5000,remaining()));
  const directory=path.join(evidenceDir,scanId,item.id);await fs.mkdir(directory,{recursive:true,mode:0o700});
  try{
    await validateTarget(item.original);
@@ -45,22 +49,22 @@ export async function collectBrowserEvidence(item,scanId,timeoutSeconds,{evidenc
      try{const checked=await validateTarget(raw);if(!publicishHost(checked.host))throw new Error('Local destination blocked');return route.continue();}
      catch{return route.abort('blockedbyclient');}
    });
-   const page=await context.newPage();page.setDefaultNavigationTimeout(remaining());
+   const page=await context.newPage();page.setDefaultNavigationTimeout(navigationTimeout());
    page.on('requestfailed',request=>{if(requestFailures.length<30)requestFailures.push({url:request.url(),error:(request.failure()?.errorText||'request failed').slice(0,100)});});
    page.on('request',request=>{try{const u=new URL(request.url());if(/^https?:$/.test(u.protocol))resourceHosts.add(u.hostname)}catch{}});
    page.on('response',response=>{const request=response.request();if(request.isNavigationRequest()&&request.frame()===page.mainFrame()){const entry={url:response.url(),status:response.status(),observedAt:new Date().toISOString()};redirects.push(entry);responseStatus=response.status();}});
    let navigationResponse=null;
-   try{navigationResponse=await page.goto(item.original,{waitUntil:'domcontentloaded',timeout:remaining()});}catch(error){if(!page.url()||page.url()==='about:blank')throw error;}
+   try{navigationResponse=await page.goto(item.original,{waitUntil:'domcontentloaded',timeout:navigationTimeout()});}catch(error){if(!page.url()||page.url()==='about:blank')throw error;}
    if(navigationResponse)responseStatus=navigationResponse.status();
-   await page.waitForTimeout(Math.min(800,remaining()));finalUrl=page.url();title=await page.title();
+   await page.waitForTimeout(Math.max(0,Math.min(800,remaining()-screenshotReserve)));finalUrl=page.url();title=await page.title();
    const observed=await page.evaluate(()=>({text:(document.body?.innerText||'').slice(0,5000),forms:[...document.forms].slice(0,20).map(form=>({action:form.action,method:form.method,fields:[...form.elements].slice(0,50).map(field=>({tag:field.tagName.toLowerCase(),type:field.type||field.tagName.toLowerCase(),label:field.labels?.[0]?.innerText||field.getAttribute('aria-label')||field.name||field.placeholder||'',name:field.name||''}))})),links:[...document.links].slice(0,500).map(link=>link.href),images:[...document.images].slice(0,80).map(image=>({src:image.currentSrc||image.src,alt:image.alt}))}));
    visibleText=String(observed.text||'').replace(/\s+/g,' ').slice(0,1800);forms=observed.forms.length;
    formFields=observed.forms.flatMap(form=>form.fields).slice(0,50);
    formActions=observed.forms.map(form=>{let actionHost=null;try{actionHost=new URL(form.action||finalUrl).hostname}catch{}return {actionHost,method:String(form.method||'get').toUpperCase()}}).slice(0,20);
    for(const link of observed.links){try{linkedHosts.add(new URL(link).hostname)}catch{}}
    const logos=observed.images.filter(image=>image.alt).slice(0,10).map(image=>{let host=null;try{host=new URL(image.src).hostname}catch{}return {alt:String(image.alt).slice(0,100),host}});
-   const rawPng=await page.screenshot({type:'png',fullPage:false,timeout:remaining()});let screenshot=rawPng,extension='png';
-   if(screenshot.length>3*1024*1024){screenshot=await page.screenshot({type:'jpeg',quality:75,fullPage:false,timeout:remaining()});extension='jpg';}
+   const rawPng=await page.screenshot({type:'png',fullPage:false,timeout:screenshotTimeout()});let screenshot=rawPng,extension='png';
+   if(screenshot.length>3*1024*1024){screenshot=await page.screenshot({type:'jpeg',quality:75,fullPage:false,timeout:screenshotTimeout()});extension='jpg';}
    if(screenshot.length>3*1024*1024)throw new Error('Screenshot exceeds the 3 MiB evidence limit.');
    const imagePath=path.join(directory,`landing.${extension}`);await fs.writeFile(imagePath,screenshot,{mode:0o600});screenshotPaths.push(path.relative(path.dirname(evidenceDir),imagePath).split(path.sep).join('/'));
    const challenge=/just a moment|checking your browser|verify you are human|captcha|security challenge|access denied/i.test(visibleText);

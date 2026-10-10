@@ -26,7 +26,7 @@ Investigate suspicious URLs with a real Firefox visit, captured page evidence, r
 | **Browser** | Playwright Firefox; a fresh browser context for each URL |
 | **Inputs** | HTTP/HTTPS URLs pasted in the UI or loaded from `.txt` / `.csv` lists |
 | **Reports** | Analyst rationale, source results, domain context, code indicators, and an actual visit screenshot when available |
-| **Optional services** | VirusTotal, Google Safe Browsing, URLhaus, DNSTwist, and OpenAI |
+| **Optional services** | VirusTotal, Google Safe Browsing, URLhaus, DNSTwist, and an optional AI endpoint |
 | **Local address** | `http://127.0.0.1:8787` |
 | **MCP** | Not implemented; use the local REST API for automation today |
 
@@ -39,10 +39,10 @@ Each URL gets its own investigation report. Findings show their source and obser
 - **Domain intelligence** — hostname, registrable domain, DNS addresses, and DNSTwist lookalike candidates when available
 - **Code indicators** — static indicators from collected page source; this does not execute page code
 - **Reputation sources** — VirusTotal, Google Safe Browsing, and URLhaus when their keys are configured
-- **AI summary** — optional synthesis of the collected evidence and screenshot when `OPENAI_API_KEY` is configured
+- **AI summary** — optional synthesis of the collected evidence and screenshot through a configurable OpenAI-compatible endpoint
 - **Coverage gaps** — unavailable providers, blocked visits, and other missing evidence are shown explicitly
 
-The UI and exports mask URL query values. Configured threat feeds still receive the original URL, including query values. When AI is enabled, collected page evidence and the screenshot are sent to OpenAI. Review provider terms, privacy, and rate limits before enabling external lookups.
+The UI and exports mask URL query values. Configured threat feeds still receive the original URL, including query values. When AI is enabled, collected page evidence and the screenshot are sent to the configured AI endpoint. Review provider terms, privacy, and rate limits before enabling external lookups.
 
 > **A verdict is time- and evidence-limited.** `Clean` means the checks that completed found no indicators at observation time; it is not a safety guarantee. `Unknown` means the evidence is insufficient for a reliable conclusion.
 
@@ -96,10 +96,13 @@ Keep keys in the VM's `.env` file. Never place provider keys in frontend code, r
 | `VIRUSTOTAL_API_KEY` | VirusTotal URL reputation | Full submitted URL |
 | `GOOGLE_SAFE_BROWSING_API_KEY` | Google Safe Browsing lookup | Full submitted URL |
 | `URLHAUS_AUTH_KEY` | URLhaus lookup | Full submitted URL |
-| `OPENAI_API_KEY` | Automatic AI intelligence summary | Collected page evidence and screenshot |
-| `OPENAI_MODEL` | Optional model selection | Used with OpenAI; default is `gpt-4.1-mini` |
+| `AI_API_KEY` | Automatic AI intelligence summary | Collected page evidence and screenshot |
+| `AI_API_BASE_URL` | OpenAI-compatible base URL; Latch appends `/chat/completions` for the default format | AI request |
+| `AI_API_URL` | Optional full endpoint override, such as `https://provider.example/v1/chat/completions` | AI request |
+| `AI_API_FORMAT` | `chat-completions` (default) or `responses` | Request and response format |
+| `AI_MODEL` | Required exact model identifier for a custom endpoint | AI request |
 
-All providers are optional. Configured reputation lookups run automatically. AI stays off when no OpenAI key is present. Restart Latch after changing `.env`; API usage may incur provider charges. RDAP is disabled.
+All providers are optional. Configured reputation lookups run automatically. AI stays off when the AI key, base URL, and full endpoint are all empty; a key is optional for local endpoints without authentication. For a Python `openai.chat.completions.create` compatible service, set `AI_API_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`; leave `AI_API_URL` blank to have Latch append `/chat/completions`. The endpoint must support OpenAI-compatible Chat Completions, structured JSON output, and image input for screenshot analysis. Existing `OPENAI_API_KEY` and `OPENAI_MODEL` settings remain supported as fallbacks. Restart Latch after changing `.env`; API usage may incur provider charges. RDAP is disabled.
 
 ## Automation API
 

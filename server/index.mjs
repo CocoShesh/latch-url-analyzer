@@ -1,7 +1,20 @@
 import 'dotenv/config';
 import { collectCode, domainIntel, synthesize } from './intelligence.mjs';
 import { firefoxHealth, collectBrowserEvidence, closeFirefox } from './browser.mjs';
-const AI_MODEL=process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const AI_API_KEY=process.env.AI_API_KEY || process.env.OPENAI_API_KEY || '';
+const AI_API_BASE_URL=process.env.AI_API_BASE_URL?.trim() || '';
+const AI_API_FORMAT=(process.env.AI_API_FORMAT || (AI_API_BASE_URL?'chat-completions':'responses')).toLowerCase();
+function resolveAiEndpoint(){
+  const fullEndpoint=process.env.AI_API_URL?.trim();if(fullEndpoint)return fullEndpoint;
+  if(!AI_API_BASE_URL)return AI_API_FORMAT==='chat-completions'?'https://api.openai.com/v1/chat/completions':'https://api.openai.com/v1/responses';
+  const url=new URL(AI_API_BASE_URL),path=url.pathname.replace(/\/+$/,'');
+  const suffix=AI_API_FORMAT==='chat-completions'?'/chat/completions':'/responses';
+  if(!path.endsWith(suffix))url.pathname=`${path}${suffix}`;
+  return url.toString();
+}
+const AI_API_URL=resolveAiEndpoint();
+const AI_API_ENABLED=Boolean(AI_API_KEY || AI_API_BASE_URL || process.env.AI_API_URL?.trim());
+const AI_MODEL=process.env.AI_MODEL || process.env.OPENAI_MODEL || (AI_API_BASE_URL?'':'gpt-4.1-mini');
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -276,9 +289,9 @@ async function runItem(job, item) {
     const failed = item.browser.status !== 'complete' || !item.browser.screenshots?.length || (job.settings.depth==='standard' && item.codeAnalysis.status!=='complete') || item.providerResults.some(x => x.status === 'error');
     const assessment = scanVerdict(item.signals, item.providerResults, item.browser, failed);
     Object.assign(item, assessment, { status: failed ? 'partial' : 'complete', finalUrl: item.browser.finalUrl || null, redirects: item.browser.redirects || [], screenshots: item.browser.screenshots || [] });
-    if(job.settings.aiConsent && process.env.OPENAI_API_KEY && !job.cancelled){
+    if(job.settings.aiConsent && AI_API_ENABLED && !job.cancelled){
       const scanStatus=item.status;item.status='summarizing';await save();
-      try{const image=job.settings.aiScreenshotConsent && item.screenshots[0] ? await fs.readFile(path.join(DATA,item.screenshots[0])):null;item.aiSummary=await synthesize(item,{key:process.env.OPENAI_API_KEY,model:AI_MODEL,image});}
+      try{const image=job.settings.aiScreenshotConsent && item.screenshots[0] ? await fs.readFile(path.join(DATA,item.screenshots[0])):null;item.aiSummary=await synthesize(item,{key:AI_API_KEY,endpoint:AI_API_URL,format:AI_API_FORMAT,model:AI_MODEL,image});}
       catch(e){item.aiSummary={status:'error',error:String(e.message).slice(0,200)}}
       item.status=scanStatus;
     }
@@ -321,7 +334,7 @@ function serveFile(res, pathname) {
 const server = http.createServer(async (req,res) => {
   const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
   try {
-    if (req.method === 'GET' && url.pathname === '/api/config') { const browser=await firefoxHealth(); return json(res,200,{ providers, aiAvailable:Boolean(process.env.OPENAI_API_KEY), aiModel:AI_MODEL, dnstwistAvailable, browserAvailable:browser.available, browserEngine:browser.engine, retentionDays:RETENTION_DAYS, maxBatch:MAX_URLS, maxConcurrency:4, localOnly:HOST==='127.0.0.1'||HOST==='localhost' }); }
+    if (req.method === 'GET' && url.pathname === '/api/config') { const browser=await firefoxHealth(); return json(res,200,{ providers, aiAvailable:AI_API_ENABLED, aiModel:AI_MODEL, aiApiFormat:AI_API_FORMAT, dnstwistAvailable, browserAvailable:browser.available, browserEngine:browser.engine, retentionDays:RETENTION_DAYS, maxBatch:MAX_URLS, maxConcurrency:4, localOnly:HOST==='127.0.0.1'||HOST==='localhost' }); }
     if (url.pathname === '/api/scans' && req.method === 'GET') return json(res,200,{ scans:scans.map(publicJob) });
     if (url.pathname === '/api/scans' && req.method === 'DELETE') { requireSameOrigin(req); for(const job of scans){job.cancelled=true;job.status='cancelled';for(const item of job.items)if(item.status==='queued')item.status='cancelled'} scans=[]; queue=[]; await fs.rm(EVIDENCE,{recursive:true,force:true}); await fs.mkdir(EVIDENCE,{recursive:true,mode:0o700}); await save(); return json(res,200,{ok:true}); }
     if (url.pathname === '/api/scans' && req.method === 'POST') {
@@ -332,7 +345,7 @@ const server = http.createServer(async (req,res) => {
       const consent = true;
       const id = crypto.randomUUID(); const now = new Date().toISOString();
       const dnstwistConsent=dnstwistAvailable&&unique.length<=25;
-      const job = { id, status:'queued', createdAt:now, updatedAt:now, total:unique.length, completed:0, cancelled:false, settings:{ depth:'standard', timeoutSeconds:20, concurrency:2, externalLookupConsent:consent, dnstwistConsent, dnstwistSkippedReason:dnstwistAvailable&&unique.length>25?'DNSTwist is capped at 25 URLs per scan. This batch exceeded the cap; other analysis completed normally.':null, continueAfterThreat:true, aiConsent:Boolean(process.env.OPENAI_API_KEY), aiScreenshotConsent:Boolean(process.env.OPENAI_API_KEY) }, items:unique.map((original,index)=>({ id:crypto.randomUUID(), index, key:original, original, host:null, status:'queued', verdict:'Unknown', confidence:0, signals:[], providerResults:[], browser:null, redirects:[], screenshots:[] })) };
+      const job = { id, status:'queued', createdAt:now, updatedAt:now, total:unique.length, completed:0, cancelled:false, settings:{ depth:'standard', timeoutSeconds:20, concurrency:2, externalLookupConsent:consent, dnstwistConsent, dnstwistSkippedReason:dnstwistAvailable&&unique.length>25?'DNSTwist is capped at 25 URLs per scan. This batch exceeded the cap; other analysis completed normally.':null, continueAfterThreat:true, aiConsent:AI_API_ENABLED, aiScreenshotConsent:AI_API_ENABLED }, items:unique.map((original,index)=>({ id:crypto.randomUUID(), index, key:original, original, host:null, status:'queued', verdict:'Unknown', confidence:0, signals:[], providerResults:[], browser:null, redirects:[], screenshots:[] })) };
       scans.unshift(job); await save();
       for (const item of job.items) queue.push({job,item});
       concurrencyLimit = Math.max(1, Math.min(4, job.settings.concurrency)); job.status='running'; pump();
