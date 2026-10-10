@@ -312,9 +312,10 @@ async function prune() {
 }
 function serveFile(res, pathname) {
   const decoded = decodeURIComponent(pathname);
-  if (!['/', '/index.html'].includes(decoded)) return json(res, 404, { error: 'Not found' });
-  const file = path.join(ROOT, 'index.html');
-  const mime = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.jpg':'image/jpeg', '.jpeg':'image/jpeg' }[path.extname(file)] || 'application/octet-stream';
+  const files = { '/':'index.html', '/index.html':'index.html', '/favicon.svg':'assets/latch-mark.svg', '/assets/latch-mark.svg':'assets/latch-mark.svg' };
+  if (!Object.hasOwn(files, decoded)) return json(res, 404, { error: 'Not found' });
+  const file = path.join(ROOT, files[decoded]);
+  const mime = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.svg':'image/svg+xml' }[path.extname(file)] || 'application/octet-stream';
   fs.readFile(file).then(data => { res.writeHead(200, { 'content-type': mime, 'x-content-type-options':'nosniff', 'cache-control':'no-store', 'content-security-policy':"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" }); res.end(data); }).catch(() => json(res,404,{error:'Not found'}));
 }
 const server = http.createServer(async (req,res) => {

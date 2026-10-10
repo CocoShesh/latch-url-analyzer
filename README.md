@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/latch-mark.svg" alt="Latch logo" width="96" />
+
 # Latch
 
 ### URL Threat Analyzer for Isolated Analyst VMs
@@ -162,6 +164,8 @@ npm run smoke
 ```text
 latch/
 ├── index.html              # Analyst UI and in-app API / MCP guide
+├── assets/
+│   └── latch-mark.svg      # Latch logo and browser favicon
 ├── server/
 │   ├── index.mjs           # Local API, scan queue, providers, egress proxy
 │   ├── browser.mjs         # Firefox visit, evidence collection, screenshot
