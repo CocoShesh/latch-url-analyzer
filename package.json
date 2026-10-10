@@ -1,0 +1,19 @@
+{
+  "name": "latch-url-threat-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "test": "node tests/integration.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "playwright": "^1.64.0",
+    "tldts": "^6.1.86"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
